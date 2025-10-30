@@ -1,3 +1,4 @@
+# rooms.py
 from tkinter import ttk
 import tkinter as tk
 from tkinter import messagebox
@@ -9,10 +10,11 @@ from sql_requests import (
 )
 
 class Rooms:
-    def __init__(self, parent_frame, db_connection):
+    def __init__(self, parent_frame, db_connection, app=None):
         self.parent_frame = parent_frame
-        self.create_rooms_form()
         self.db_connection = db_connection
+        self.app = app
+        self.create_rooms_form()
     
     def create_rooms_form(self):
         labels = ['ID', 'Номер', 'Вместимость', 'Комфортность', 'Цена']
@@ -52,6 +54,9 @@ class Rooms:
         delete_button = ttk.Button(buttons_frame, text="Удалить запись", command=self.delete_record)
         delete_button.grid(row=0, column=3, padx=5, pady=5)
         
+        refresh_button = ttk.Button(buttons_frame, text="Обновить", command=self.show_rooms)
+        refresh_button.grid(row=0, column=4, padx=5, pady=5)
+        
         # Добавляем событие двойного щелчка
         self.rooms_table.bind("<Double-1>", self.fill_entries)
     
@@ -77,6 +82,13 @@ class Rooms:
             self.show_rooms()
             self.clear_entries()
             messagebox.showinfo("Успех", "Номер успешно добавлен!")
+            
+            # Обновляем данные в других модулях
+            if self.app:
+                if hasattr(self.app, 'bookings'):
+                    self.app.bookings.refresh_data()
+                if hasattr(self.app, 'data_filter'):
+                    self.app.data_filter.refresh_data()
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось добавить номер: {e}")
     
@@ -127,6 +139,14 @@ class Rooms:
             self.rooms_table.delete(selected_item)
             self.clear_entries()
             messagebox.showinfo("Успех", "Номер и все связанные бронирования успешно удалены!")
+            
+            # Обновляем данные в других модулях
+            if self.app:
+                if hasattr(self.app, 'bookings'):
+                    self.app.bookings.refresh_data()
+                    self.app.bookings.show_bookings()
+                if hasattr(self.app, 'data_filter'):
+                    self.app.data_filter.refresh_data()
         except Exception as e:
             self.db_connection.rollback()
             messagebox.showerror("Ошибка", f"Не удалось удалить номер: {e}")
@@ -153,6 +173,14 @@ class Rooms:
             self.show_rooms()
             self.clear_entries()
             messagebox.showinfo("Успех", "Данные номера успешно обновлены!")
+            
+            # Обновляем данные в других модулях
+            if self.app:
+                if hasattr(self.app, 'bookings'):
+                    self.app.bookings.refresh_data()
+                    self.app.bookings.show_bookings()
+                if hasattr(self.app, 'data_filter'):
+                    self.app.data_filter.refresh_data()
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось обновить данные: {e}")
     

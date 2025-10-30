@@ -72,3 +72,15 @@ AND (%s IS NULL OR b.room_id = %s)
 AND (%s IS NULL OR b.check_in_date >= %s)
 AND (%s IS NULL OR b.check_in_date <= %s)
 """
+
+UPDATE_CLIENT_BOOKINGS_SQL = """
+UPDATE bookings 
+SET client_id = %s 
+WHERE client_id = %s
+"""
+
+UPDATE_ROOM_BOOKINGS_SQL = """
+UPDATE bookings 
+SET room_id = %s 
+WHERE room_id = %s
+"""

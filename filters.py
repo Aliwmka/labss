@@ -1,3 +1,4 @@
+# filters.py
 from tkinter import ttk
 from tkcalendar import DateEntry
 from export import export_to_word, export_to_excel
@@ -15,7 +16,7 @@ from sql_requests import (
 )
 
 class DataFilter:
-    def __init__(self, parent_frame, db_connection):
+    def __init__(self, parent_frame, db_connection, app=None):
         self.results_table = None
         self.date_to_entry = None
         self.date_from_entry = None
@@ -23,9 +24,23 @@ class DataFilter:
         self.client_combobox = None
         self.parent_frame = parent_frame
         self.db_connection = db_connection
+        self.app = app
         self.create_filter_form()
+        self.refresh_data()
+    
+    def refresh_data(self):
+        """Обновление данных клиентов и номеров"""
         self.clients = self.fetch_clients_for_import()
         self.rooms = self.fetch_rooms_for_import()
+        
+        if hasattr(self, 'client_combobox'):
+            self.load_clients()
+        
+        if hasattr(self, 'room_combobox'):
+            self.load_rooms()
+        
+        # Обновляем таблицу результатов
+        self.reload_all_bookings()
     
     def fetch_clients_for_import(self):
         cur = self.db_connection.cursor()
@@ -102,35 +117,42 @@ class DataFilter:
         word_imp_button = ttk.Button(buttons_frame, text="Импорт из Word", command=self.handle_import_word)
         word_imp_button.grid(row=2, column=1, padx=5, pady=5, sticky='ew')
         
+        refresh_button = ttk.Button(buttons_frame, text="Обновить данные", command=self.refresh_data)
+        refresh_button.grid(row=3, column=0, columnspan=2, padx=5, pady=5, sticky='ew')
+        
         max_button_width = max(word_button.winfo_reqwidth(), excel_button.winfo_reqwidth(), 
                               word_imp_button.winfo_reqwidth(), excel_imp_button.winfo_reqwidth())
         word_button.config(width=max_button_width)
         excel_button.config(width=max_button_width)
         word_imp_button.config(width=max_button_width)
         excel_imp_button.config(width=max_button_width)
-        
-        self.load_clients()
-        self.load_rooms()
     
     def handle_import_excel(self):
         def on_data(headers, rows):
-            self.process_imported_data(rows)
+            self.process_imported_data(headers, rows)
         import_from_excel(self.parent_frame.winfo_toplevel(), on_data)
     
     def handle_import_word(self):
         def on_data(headers, rows):
-            self.process_imported_data(rows)
+            self.process_imported_data(headers, rows)
         import_from_word(self.parent_frame.winfo_toplevel(), on_data)
     
-    def process_imported_data(self, rows):
+    def process_imported_data(self, headers, rows):
         try:
             imported_count = 0
             for row in rows:
                 if len(row) < 5:
                     continue
                 
-                client_name = row[0]
-                room_info = row[1]
+                client_name = row[0] if len(row) > 0 else ""
+                room_info = row[1] if len(row) > 1 else ""
+                check_in_date = row[2] if len(row) > 2 else ""
+                check_out_date = row[3] if len(row) > 3 else ""
+                note = row[4] if len(row) > 4 else ""
+                
+                # Пропускаем строки с недостаточными данными
+                if not client_name or not room_info or not check_in_date:
+                    continue
                 
                 client_id = next((client[0] for client in self.clients if f"{client[1]} {client[2]} {client[3]}" == client_name), None)
                 room_id = next((room[0] for room in self.rooms if f"{room[1]} ({room[2]})" == room_info), None)
@@ -139,12 +161,17 @@ class DataFilter:
                     continue
                 
                 cur = self.db_connection.cursor()
-                cur.execute(INSERT_BOOKING_SQL, (client_id, room_id, row[2], row[3], row[4]))
+                cur.execute(INSERT_BOOKING_SQL, (client_id, room_id, check_in_date, check_out_date, note))
                 self.db_connection.commit()
                 cur.close()
                 imported_count += 1
             
             self.reload_all_bookings()
+            
+            # Обновляем данные в других модулях
+            if self.app and hasattr(self.app, 'bookings'):
+                self.app.bookings.show_bookings()
+            
             messagebox.showinfo("Успех", f"Данные успешно импортированы! Добавлено {imported_count} записей.")
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось импортировать данные: {e}")
@@ -180,8 +207,7 @@ class DataFilter:
         self.room_combobox.set('')
         self.date_from_entry.delete(0, 'end')
         self.date_to_entry.delete(0, 'end')
-        for row in self.results_table.get_children():
-            self.results_table.delete(row)
+        self.reload_all_bookings()
     
     def load_clients(self):
         cur = self.db_connection.cursor()

@@ -1,3 +1,4 @@
+# import_data.py
 from docx import Document
 import pandas as pd
 import tkinter as tk
@@ -14,6 +15,7 @@ def import_from_excel(parent_window, callback):
 
     try:
         df = pd.read_excel(filepath, dtype=str)
+        df = df.where(pd.notnull(df), None)  # Заменяем NaN на None
         data = df.values.tolist()
         headers = df.columns.tolist()
         callback(headers, data)
@@ -43,7 +45,9 @@ def import_from_word(parent_window, callback):
             if i == 0:
                 headers = row_data
             else:
-                data.append(row_data)
+                # Пропускаем пустые строки
+                if any(cell for cell in row_data):
+                    data.append(row_data)
         callback(headers, data)
     except Exception as e:
         messagebox.showerror("Ошибка", f"Не удалось прочитать Word: {e}")

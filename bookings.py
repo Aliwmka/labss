@@ -1,3 +1,4 @@
+# bookings.py
 from tkinter import ttk
 import tkinter as tk
 from tkinter import messagebox
@@ -12,31 +13,27 @@ from sql_requests import (
 )
 
 class Bookings:
-    def __init__(self, parent_frame, db_connection):
+    def __init__(self, parent_frame, db_connection, app=None):
         self.parent_frame = parent_frame
         self.db_connection = db_connection
+        self.app = app
         self.create_bookings_form()
     
     def create_bookings_form(self):
-        self.clients = self.fetch_clients()
-        self.rooms = self.fetch_rooms()
+        self.refresh_data()
         
         labels = ['ID', 'Клиент', 'Номер', 'Дата заселения', 'Дата выселения', 'Примечание']
         self.booking_entries = []
         
         # Поле со списком для клиентов
         ttk.Label(self.parent_frame, text='Клиент').grid(row=0, column=0, padx=(10, 5), pady=5, sticky='e')
-        self.client_combobox = ttk.Combobox(self.parent_frame, 
-                                          values=[f"{client[1]} {client[2]} {client[3]}" for client in self.clients],
-                                          state="readonly")
+        self.client_combobox = ttk.Combobox(self.parent_frame, state="readonly")
         self.client_combobox.grid(row=0, column=1, padx=(5, 10), pady=5, sticky='w')
         self.booking_entries.append(self.client_combobox)
         
         # Поле со списком для номеров
         ttk.Label(self.parent_frame, text='Номер').grid(row=1, column=0, padx=(10, 5), pady=5, sticky='e')
-        self.room_combobox = ttk.Combobox(self.parent_frame,
-                                        values=[f"{room[1]} ({room[2]})" for room in self.rooms],
-                                        state="readonly")
+        self.room_combobox = ttk.Combobox(self.parent_frame, state="readonly")
         self.room_combobox.grid(row=1, column=1, padx=(5, 10), pady=5, sticky='w')
         self.booking_entries.append(self.room_combobox)
         
@@ -86,7 +83,21 @@ class Bookings:
         delete_button = ttk.Button(buttons_frame, text="Удалить запись", command=self.delete_record)
         delete_button.grid(row=0, column=3, padx=5, pady=5)
         
+        refresh_button = ttk.Button(buttons_frame, text="Обновить", command=self.refresh_data)
+        refresh_button.grid(row=0, column=4, padx=5, pady=5)
+        
         self.bookings_table.bind("<Double-1>", self.fill_entries)
+    
+    def refresh_data(self):
+        """Обновление данных клиентов и номеров"""
+        self.clients = self.fetch_clients()
+        self.rooms = self.fetch_rooms()
+        
+        if hasattr(self, 'client_combobox'):
+            self.client_combobox['values'] = [f"{client[1]} {client[2]} {client[3]}" for client in self.clients]
+        
+        if hasattr(self, 'room_combobox'):
+            self.room_combobox['values'] = [f"{room[1]} ({room[2]})" for room in self.rooms]
     
     def fill_entries(self, event):
         if not self.bookings_table.selection():
@@ -124,6 +135,10 @@ class Bookings:
             self.show_bookings()
             self.clear_entries()
             messagebox.showinfo("Успех", "Бронирование успешно добавлено!")
+            
+            # Обновляем данные в фильтрах
+            if self.app and hasattr(self.app, 'data_filter'):
+                self.app.data_filter.refresh_data()
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось добавить бронирование: {e}")
     
@@ -188,6 +203,10 @@ class Bookings:
             self.bookings_table.delete(selected_item)
             self.clear_entries()
             messagebox.showinfo("Успех", "Бронирование успешно удалено!")
+            
+            # Обновляем данные в фильтрах
+            if self.app and hasattr(self.app, 'data_filter'):
+                self.app.data_filter.refresh_data()
         except Exception as e:
             self.db_connection.rollback()
             messagebox.showerror("Ошибка", f"Не удалось удалить бронирование: {e}")
@@ -226,6 +245,10 @@ class Bookings:
             self.show_bookings()
             self.clear_entries()
             messagebox.showinfo("Успех", "Данные бронирования успешно обновлены!")
+            
+            # Обновляем данные в фильтрах
+            if self.app and hasattr(self.app, 'data_filter'):
+                self.app.data_filter.refresh_data()
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось обновить данные: {e}")
     

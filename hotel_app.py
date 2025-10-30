@@ -1,3 +1,4 @@
+# hotel_app.py
 import tkinter as tk
 from tkinter import ttk
 import tkinter.font as tkfont
@@ -61,22 +62,22 @@ class HotelApp(tk.Tk):
         # Клиенты
         self.clients_frame = ttk.Frame(tab_control)
         tab_control.add(self.clients_frame, text='Клиенты')
-        self.clients = Clients(self.clients_frame, self.db_connection)
+        self.clients = Clients(self.clients_frame, self.db_connection, self)
         
         # Номера
         self.rooms_frame = ttk.Frame(tab_control)
         tab_control.add(self.rooms_frame, text='Номера')
-        self.rooms = Rooms(self.rooms_frame, self.db_connection)
+        self.rooms = Rooms(self.rooms_frame, self.db_connection, self)
         
         # Бронирования
         self.bookings_frame = ttk.Frame(tab_control)
         tab_control.add(self.bookings_frame, text='Бронирования')
-        self.bookings = Bookings(self.bookings_frame, self.db_connection)
+        self.bookings = Bookings(self.bookings_frame, self.db_connection, self)
         
         # Фильтрация данных
         self.filter_frame = ttk.Frame(tab_control)
         tab_control.add(self.filter_frame, text='Фильтрация данных')
-        self.data_filter = DataFilter(self.filter_frame, self.db_connection)
+        self.data_filter = DataFilter(self.filter_frame, self.db_connection, self)
         
         tab_control.pack(expand=1, fill='both')
     
