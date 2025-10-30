@@ -140,41 +140,83 @@ class DataFilter:
     def process_imported_data(self, headers, rows):
         try:
             imported_count = 0
+            skipped_count = 0
+            
             for row in rows:
-                if len(row) < 5:
+                # Пропускаем пустые строки
+                if not any(row):
+                    continue
+                    
+                # Обрабатываем строку в зависимости от количества столбцов
+                if len(row) >= 5:
+                    client_name = str(row[0]).strip() if row[0] else ""
+                    room_info = str(row[1]).strip() if row[1] else ""
+                    check_in_date = str(row[2]).strip() if row[2] else ""
+                    check_out_date = str(row[3]).strip() if row[3] else ""
+                    note = str(row[4]).strip() if len(row) > 4 else ""
+                else:
+                    # Если столбцов меньше 5, пропускаем строку
+                    skipped_count += 1
                     continue
                 
-                client_name = row[0] if len(row) > 0 else ""
-                room_info = row[1] if len(row) > 1 else ""
-                check_in_date = row[2] if len(row) > 2 else ""
-                check_out_date = row[3] if len(row) > 3 else ""
-                note = row[4] if len(row) > 4 else ""
-                
-                # Пропускаем строки с недостаточными данными
+                # Проверяем обязательные поля
                 if not client_name or not room_info or not check_in_date:
+                    skipped_count += 1
                     continue
                 
-                client_id = next((client[0] for client in self.clients if f"{client[1]} {client[2]} {client[3]}" == client_name), None)
-                room_id = next((room[0] for room in self.rooms if f"{room[1]} ({room[2]})" == room_info), None)
+                # Ищем клиента по ФИО
+                client_id = None
+                for client in self.clients:
+                    full_name = f"{client[1]} {client[2]} {client[3]}".strip()
+                    if client_name == full_name:
+                        client_id = client[0]
+                        break
+                
+                # Ищем номер по информации
+                room_id = None
+                for room in self.rooms:
+                    room_full_info = f"{room[1]} ({room[2]})"
+                    if room_info == room_full_info:
+                        room_id = room[0]
+                        break
                 
                 if not client_id or not room_id:
+                    skipped_count += 1
                     continue
                 
-                cur = self.db_connection.cursor()
-                cur.execute(INSERT_BOOKING_SQL, (client_id, room_id, check_in_date, check_out_date, note))
-                self.db_connection.commit()
-                cur.close()
-                imported_count += 1
+                try:
+                    # Проверяем даты
+                    from datetime import datetime
+                    check_in = datetime.strptime(check_in_date, '%Y-%m-%d').date() if check_in_date else None
+                    check_out = datetime.strptime(check_out_date, '%Y-%m-%d').date() if check_out_date else None
+                    
+                    cur = self.db_connection.cursor()
+                    cur.execute(INSERT_BOOKING_SQL, (client_id, room_id, check_in_date, check_out_date, note))
+                    self.db_connection.commit()
+                    cur.close()
+                    imported_count += 1
+                    
+                except ValueError as e:
+                    # Если дата в неправильном формате
+                    skipped_count += 1
+                    continue
+                except Exception as e:
+                    # Другие ошибки базы данных
+                    skipped_count += 1
+                    continue
             
+            # Обновляем данные
             self.reload_all_bookings()
-            
-            # Обновляем данные в других модулях
             if self.app and hasattr(self.app, 'bookings'):
                 self.app.bookings.show_bookings()
             
-            messagebox.showinfo("Успех", f"Данные успешно импортированы! Добавлено {imported_count} записей.")
+            message = f"Импорт завершен!\nУспешно: {imported_count} записей"
+            if skipped_count > 0:
+                message += f"\nПропущено: {skipped_count} записей (некорректные данные)"
+            messagebox.showinfo("Успех", message)
+            
         except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось импортировать данные: {e}")
+            messagebox.showerror("Ошибка", f"Не удалось импортировать данные: {str(e)}")
     
     def reload_all_bookings(self):
         cur = self.db_connection.cursor()

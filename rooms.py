@@ -57,6 +57,9 @@ class Rooms:
         refresh_button = ttk.Button(buttons_frame, text="Обновить", command=self.show_rooms)
         refresh_button.grid(row=0, column=4, padx=5, pady=5)
         
+        import_button = ttk.Button(buttons_frame, text="Импорт из Excel", command=self.handle_import_excel)
+        import_button.grid(row=0, column=5, padx=5, pady=5)
+        
         # Добавляем событие двойного щелчка
         self.rooms_table.bind("<Double-1>", self.fill_entries)
     
@@ -78,6 +81,10 @@ class Rooms:
             return
         
         try:
+            # Проверяем числовые поля
+            capacity = int(data[1])
+            price = float(data[3])
+            
             self.insert_room(data)
             self.show_rooms()
             self.clear_entries()
@@ -89,6 +96,8 @@ class Rooms:
                     self.app.bookings.refresh_data()
                 if hasattr(self.app, 'data_filter'):
                     self.app.data_filter.refresh_data()
+        except ValueError:
+            messagebox.showerror("Ошибка", "Вместимость и Цена должны быть числами!")
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось добавить номер: {e}")
     
@@ -166,6 +175,10 @@ class Rooms:
             return
         
         try:
+            # Проверяем числовые поля
+            capacity = int(data[1])
+            price = float(data[3])
+            
             cur = self.db_connection.cursor()
             cur.execute(EDIT_ROOM_SQL, (*data, room_id))
             self.db_connection.commit()
@@ -181,9 +194,70 @@ class Rooms:
                     self.app.bookings.show_bookings()
                 if hasattr(self.app, 'data_filter'):
                     self.app.data_filter.refresh_data()
+        except ValueError:
+            messagebox.showerror("Ошибка", "Вместимость и Цена должны быть числами!")
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось обновить данные: {e}")
     
     def clear_entries(self):
         for entry in self.room_entries:
             entry.delete(0, tk.END)
+    
+    def handle_import_excel(self):
+        def on_data(headers, rows):
+            self.process_imported_rooms(headers, rows)
+        
+        from import_data import import_rooms_from_excel
+        import_rooms_from_excel(self.parent_frame.winfo_toplevel(), on_data)
+    
+    def process_imported_rooms(self, headers, rows):
+        try:
+            imported_count = 0
+            skipped_count = 0
+            
+            for row in rows:
+                if len(row) < 4:
+                    skipped_count += 1
+                    continue
+                    
+                room_number = str(row[0]).strip() if row[0] else ""
+                capacity = str(row[1]).strip() if row[1] else ""
+                comfort_level = str(row[2]).strip() if row[2] else ""
+                price = str(row[3]).strip() if row[3] else ""
+                
+                # Проверяем обязательные поля
+                if not room_number or not capacity or not comfort_level or not price:
+                    skipped_count += 1
+                    continue
+                
+                try:
+                    # Преобразуем числовые поля
+                    capacity_int = int(capacity)
+                    price_float = float(price)
+                    
+                    cur = self.db_connection.cursor()
+                    cur.execute(INSERT_ROOM_SQL, (room_number, capacity_int, comfort_level, price_float))
+                    self.db_connection.commit()
+                    cur.close()
+                    imported_count += 1
+                    
+                except (ValueError, Exception) as e:
+                    skipped_count += 1
+                    continue
+            
+            self.show_rooms()
+            
+            # Обновляем данные в других модулях
+            if self.app:
+                if hasattr(self.app, 'bookings'):
+                    self.app.bookings.refresh_data()
+                if hasattr(self.app, 'data_filter'):
+                    self.app.data_filter.refresh_data()
+            
+            message = f"Импорт номеров завершен!\nУспешно: {imported_count} записей"
+            if skipped_count > 0:
+                message += f"\nПропущено: {skipped_count} записей (некорректные данные)"
+            messagebox.showinfo("Успех", message)
+            
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось импортировать номера: {str(e)}")

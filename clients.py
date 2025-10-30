@@ -57,6 +57,9 @@ class Clients:
         refresh_button = ttk.Button(buttons_frame, text="Обновить", command=self.show_clients)
         refresh_button.grid(row=0, column=4, padx=5, pady=5)
         
+        import_button = ttk.Button(buttons_frame, text="Импорт из Excel", command=self.handle_import_excel)
+        import_button.grid(row=0, column=5, padx=5, pady=5)
+        
         # Добавляем событие двойного щелчка
         self.clients_table.bind("<Double-1>", self.fill_entries)
     
@@ -187,3 +190,59 @@ class Clients:
     def clear_entries(self):
         for entry in self.client_entries:
             entry.delete(0, tk.END)
+    
+    def handle_import_excel(self):
+        def on_data(headers, rows):
+            self.process_imported_clients(headers, rows)
+        
+        from import_data import import_clients_from_excel
+        import_clients_from_excel(self.parent_frame.winfo_toplevel(), on_data)
+    
+    def process_imported_clients(self, headers, rows):
+        try:
+            imported_count = 0
+            skipped_count = 0
+            
+            for row in rows:
+                if len(row) < 5:
+                    skipped_count += 1
+                    continue
+                    
+                last_name = str(row[0]).strip() if row[0] else ""
+                first_name = str(row[1]).strip() if row[1] else ""
+                middle_name = str(row[2]).strip() if row[2] else ""
+                passport_data = str(row[3]).strip() if row[3] else ""
+                comment = str(row[4]).strip() if len(row) > 4 else ""
+                
+                # Проверяем обязательные поля
+                if not last_name or not first_name or not passport_data:
+                    skipped_count += 1
+                    continue
+                
+                try:
+                    cur = self.db_connection.cursor()
+                    cur.execute(INSERT_CLIENT_SQL, (last_name, first_name, middle_name, passport_data, comment))
+                    self.db_connection.commit()
+                    cur.close()
+                    imported_count += 1
+                    
+                except Exception as e:
+                    skipped_count += 1
+                    continue
+            
+            self.show_clients()
+            
+            # Обновляем данные в других модулях
+            if self.app:
+                if hasattr(self.app, 'bookings'):
+                    self.app.bookings.refresh_data()
+                if hasattr(self.app, 'data_filter'):
+                    self.app.data_filter.refresh_data()
+            
+            message = f"Импорт клиентов завершен!\nУспешно: {imported_count} записей"
+            if skipped_count > 0:
+                message += f"\nПропущено: {skipped_count} записей (некорректные данные)"
+            messagebox.showinfo("Успех", message)
+            
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось импортировать клиентов: {str(e)}")
