@@ -4,6 +4,7 @@ from tkcalendar import DateEntry
 from export import export_to_word, export_to_excel
 from import_data import import_from_excel, import_from_word
 from tkinter import messagebox
+from datetime import datetime
 from sql_requests import (
     LOAD_CLIENTS_FOR_FILTER_SQL,
     LOAD_ROOMS_FOR_FILTER_SQL,
@@ -82,11 +83,14 @@ class DataFilter:
         self.date_to_entry.delete(0, 'end')
         
         # Таблица результатов
-        self.results_table = ttk.Treeview(self.parent_frame, columns=(
-            'ID', 'Клиент', 'Номер', 'Дата заселения', 'Дата выселения', 'Примечание'),
-            show='headings')
-        for label in self.results_table["columns"]:
-            self.results_table.heading(label, text=label)
+        columns = ('ID', 'Клиент', 'Номер', 'Дата заселения', 'Дата выселения', 'Примечание')
+        self.results_table = ttk.Treeview(self.parent_frame, columns=columns, show='headings')
+        
+        # Настраиваем заголовки колонок
+        for col in columns:
+            self.results_table.heading(col, text=col)
+            self.results_table.column(col, width=150, anchor='center')
+        
         self.results_table.grid(row=3, column=0, columnspan=2, padx=10, pady=10, sticky='nsew')
         
         scrollbar = ttk.Scrollbar(self.parent_frame, orient="vertical", command=self.results_table.yview)
@@ -120,12 +124,10 @@ class DataFilter:
         refresh_button = ttk.Button(buttons_frame, text="Обновить данные", command=self.refresh_data)
         refresh_button.grid(row=3, column=0, columnspan=2, padx=5, pady=5, sticky='ew')
         
-        max_button_width = max(word_button.winfo_reqwidth(), excel_button.winfo_reqwidth(), 
-                              word_imp_button.winfo_reqwidth(), excel_imp_button.winfo_reqwidth())
-        word_button.config(width=max_button_width)
-        excel_button.config(width=max_button_width)
-        word_imp_button.config(width=max_button_width)
-        excel_imp_button.config(width=max_button_width)
+        # Настройка весов для растягивания
+        self.parent_frame.columnconfigure(0, weight=1)
+        self.parent_frame.columnconfigure(1, weight=1)
+        self.parent_frame.rowconfigure(3, weight=1)
     
     def handle_import_excel(self):
         def on_data(headers, rows):
@@ -141,67 +143,117 @@ class DataFilter:
         try:
             imported_count = 0
             skipped_count = 0
+            errors = []
             
-            for row in rows:
+            print(f"Начало обработки импорта: {len(rows)} записей")
+            print(f"Заголовки: {headers}")
+            
+            for i, row in enumerate(rows):
                 # Пропускаем пустые строки
-                if not any(row):
-                    continue
-                    
-                # Обрабатываем строку в зависимости от количества столбцов
-                if len(row) >= 5:
-                    client_name = str(row[0]).strip() if row[0] else ""
-                    room_info = str(row[1]).strip() if row[1] else ""
-                    check_in_date = str(row[2]).strip() if row[2] else ""
-                    check_out_date = str(row[3]).strip() if row[3] else ""
-                    note = str(row[4]).strip() if len(row) > 4 else ""
-                else:
-                    # Если столбцов меньше 5, пропускаем строку
+                if not any(str(cell).strip() for cell in row if cell is not None):
                     skipped_count += 1
                     continue
+                    
+                print(f"Обработка строки {i}: {row}")
+                
+                # Определяем индексы столбцов на основе заголовков
+                client_col = self._find_column_index(headers, ['клиент', 'client', 'фио', 'фам'])
+                room_col = self._find_column_index(headers, ['номер', 'room', 'комната'])
+                check_in_col = self._find_column_index(headers, ['заселение', 'checkin', 'дата заселения', 'дата начала'])
+                check_out_col = self._find_column_index(headers, ['выселение', 'checkout', 'дата выселения', 'дата окончания'])
+                note_col = self._find_column_index(headers, ['примечание', 'note', 'комментарий'])
+                
+                # Если не нашли по заголовкам, используем порядок по умолчанию
+                if client_col is None: client_col = 0
+                if room_col is None: room_col = 1
+                if check_in_col is None: check_in_col = 2
+                if check_out_col is None: check_out_col = 3
+                if note_col is None: note_col = 4
+                
+                # Получаем данные с проверкой индексов
+                client_name = str(row[client_col]).strip() if len(row) > client_col and row[client_col] else ""
+                room_info = str(row[room_col]).strip() if len(row) > room_col and row[room_col] else ""
+                check_in_date = str(row[check_in_col]).strip() if len(row) > check_in_col and row[check_in_col] else ""
+                check_out_date = str(row[check_out_col]).strip() if len(row) > check_out_col and row[check_out_col] else ""
+                note = str(row[note_col]).strip() if len(row) > note_col and row[note_col] else ""
+                
+                print(f"Извлеченные данные: клиент='{client_name}', номер='{room_info}', заезд='{check_in_date}'")
                 
                 # Проверяем обязательные поля
                 if not client_name or not room_info or not check_in_date:
+                    errors.append(f"Строка {i+1}: отсутствуют обязательные поля")
                     skipped_count += 1
                     continue
                 
-                # Ищем клиента по ФИО
+                # Ищем клиента по ФИО (разные варианты сопоставления)
                 client_id = None
                 for client in self.clients:
                     full_name = f"{client[1]} {client[2]} {client[3]}".strip()
-                    if client_name == full_name:
+                    last_first = f"{client[1]} {client[2]}".strip()
+                    
+                    if (client_name == full_name or 
+                        client_name == last_first or
+                        client_name.startswith(client[1]) or  # Только фамилия
+                        full_name.startswith(client_name)):   # Частичное совпадение
                         client_id = client[0]
+                        print(f"Найден клиент: {full_name} -> ID: {client_id}")
                         break
                 
                 # Ищем номер по информации
                 room_id = None
                 for room in self.rooms:
                     room_full_info = f"{room[1]} ({room[2]})"
-                    if room_info == room_full_info:
+                    room_simple = f"{room[1]}"
+                    
+                    if (room_info == room_full_info or 
+                        room_info == room_simple or
+                        room_info.startswith(room[1]) or
+                        room_full_info.startswith(room_info)):
                         room_id = room[0]
+                        print(f"Найден номер: {room_full_info} -> ID: {room_id}")
                         break
                 
-                if not client_id or not room_id:
+                if not client_id:
+                    errors.append(f"Строка {i+1}: клиент '{client_name}' не найден в базе")
+                    skipped_count += 1
+                    continue
+                    
+                if not room_id:
+                    errors.append(f"Строка {i+1}: номер '{room_info}' не найден в базе")
                     skipped_count += 1
                     continue
                 
                 try:
-                    # Проверяем даты
-                    from datetime import datetime
-                    check_in = datetime.strptime(check_in_date, '%Y-%m-%d').date() if check_in_date else None
-                    check_out = datetime.strptime(check_out_date, '%Y-%m-%d').date() if check_out_date else None
+                    # Нормализуем даты
+                    check_in_normalized = self._normalize_date(check_in_date)
+                    check_out_normalized = self._normalize_date(check_out_date) if check_out_date else None
+                    
+                    if not check_in_normalized:
+                        errors.append(f"Строка {i+1}: неверный формат даты заселения '{check_in_date}'")
+                        skipped_count += 1
+                        continue
+                    
+                    # Проверяем возможность бронирования (нет конфликтующих броней)
+                    if not self._check_booking_possible(room_id, check_in_normalized, check_out_normalized):
+                        errors.append(f"Строка {i+1}: номер занят в указанные даты")
+                        skipped_count += 1
+                        continue
                     
                     cur = self.db_connection.cursor()
-                    cur.execute(INSERT_BOOKING_SQL, (client_id, room_id, check_in_date, check_out_date, note))
+                    cur.execute(INSERT_BOOKING_SQL, (
+                        client_id, 
+                        room_id, 
+                        check_in_normalized, 
+                        check_out_normalized, 
+                        note
+                    ))
                     self.db_connection.commit()
                     cur.close()
                     imported_count += 1
+                    print(f"Успешно импортирована запись {i+1}")
                     
-                except ValueError as e:
-                    # Если дата в неправильном формате
-                    skipped_count += 1
-                    continue
                 except Exception as e:
-                    # Другие ошибки базы данных
+                    errors.append(f"Строка {i+1}: ошибка базы данных - {str(e)}")
                     skipped_count += 1
                     continue
             
@@ -210,19 +262,97 @@ class DataFilter:
             if self.app and hasattr(self.app, 'bookings'):
                 self.app.bookings.show_bookings()
             
+            # Формируем сообщение о результате
             message = f"Импорт завершен!\nУспешно: {imported_count} записей"
             if skipped_count > 0:
-                message += f"\nПропущено: {skipped_count} записей (некорректные данные)"
-            messagebox.showinfo("Успех", message)
+                message += f"\nПропущено: {skipped_count} записей"
+            
+            if errors:
+                error_details = "\n".join(errors[:10])  # Показываем первые 10 ошибок
+                if len(errors) > 10:
+                    error_details += f"\n... и еще {len(errors) - 10} ошибок"
+                message += f"\n\nОшибки:\n{error_details}"
+            
+            messagebox.showinfo("Результат импорта", message)
             
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось импортировать данные: {str(e)}")
+            print(f"Критическая ошибка импорта: {e}")
+    
+    def _find_column_index(self, headers, possible_names):
+        """Находит индекс столбца по возможным названиям"""
+        if not headers:
+            return None
+            
+        headers_lower = [str(h).lower() for h in headers]
+        for name in possible_names:
+            for i, header in enumerate(headers_lower):
+                if name in header:
+                    return i
+        return None
+    
+    def _normalize_date(self, date_str):
+        """Нормализует дату в формат YYYY-MM-DD"""
+        if not date_str:
+            return None
+            
+        date_str = str(date_str).strip()
+        
+        # Пробуем разные форматы дат
+        date_formats = [
+            '%Y-%m-%d',
+            '%d.%m.%Y',
+            '%d/%m/%Y',
+            '%d-%m-%Y',
+            '%Y.%m.%d',
+            '%Y/%m/%d'
+        ]
+        
+        for fmt in date_formats:
+            try:
+                date_obj = datetime.strptime(date_str, fmt)
+                return date_obj.strftime('%Y-%m-%d')
+            except ValueError:
+                continue
+        
+        return None
+    
+    def _check_booking_possible(self, room_id, check_in, check_out):
+        """Проверяет, свободен ли номер в указанные даты"""
+        try:
+            cur = self.db_connection.cursor()
+            
+            if check_out:
+                # Проверяем пересечение дат
+                cur.execute("""
+                    SELECT COUNT(*) FROM bookings 
+                    WHERE room_id = %s AND (
+                        (check_in_date <= %s AND check_out_date >= %s) OR
+                        (check_in_date <= %s AND check_out_date >= %s) OR
+                        (check_in_date >= %s AND check_out_date <= %s)
+                    )
+                """, (room_id, check_in, check_in, check_out, check_out, check_in, check_out))
+            else:
+                # Только дата заселения
+                cur.execute("""
+                    SELECT COUNT(*) FROM bookings 
+                    WHERE room_id = %s AND %s BETWEEN check_in_date AND check_out_date
+                """, (room_id, check_in))
+            
+            count = cur.fetchone()[0]
+            cur.close()
+            
+            return count == 0
+            
+        except Exception as e:
+            print(f"Ошибка проверки бронирования: {e}")
+            return True  # В случае ошибки разрешаем бронирование
     
     def reload_all_bookings(self):
         cur = self.db_connection.cursor()
         cur.execute("""
             SELECT b.booking_id, 
-                   c.last_name || ' ' || c.first_name || ' ' || c.middle_name AS client_name,
+                   c.last_name || ' ' || c.first_name || ' ' || COALESCE(c.middle_name, '') AS client_name,
                    r.room_number || ' (' || r.comfort_level || ')' AS room_info,
                    b.check_in_date, b.check_out_date, b.note
             FROM bookings b
@@ -233,8 +363,11 @@ class DataFilter:
         results = cur.fetchall()
         cur.close()
         
+        # Очищаем таблицу
         for row in self.results_table.get_children():
             self.results_table.delete(row)
+        
+        # Заполняем новыми данными
         for result in results:
             self.results_table.insert('', 'end', values=result)
     
@@ -256,14 +389,18 @@ class DataFilter:
         cur.execute(LOAD_CLIENTS_FOR_FILTER_SQL)
         clients = cur.fetchall()
         cur.close()
-        self.client_combobox['values'] = [f"{client[1]} {client[2]} {client[3]}" for client in clients]
+        client_names = [f"{client[1]} {client[2]} {client[3]}" for client in clients]
+        self.client_combobox['values'] = client_names
+        print(f"Загружено {len(client_names)} клиентов для фильтра")
     
     def load_rooms(self):
         cur = self.db_connection.cursor()
         cur.execute(LOAD_ROOMS_FOR_FILTER_SQL)
         rooms = cur.fetchall()
         cur.close()
-        self.room_combobox['values'] = [f"{room[1]} ({room[2]})" for room in rooms]
+        room_names = [f"{room[1]} ({room[2]})" for room in rooms]
+        self.room_combobox['values'] = room_names
+        print(f"Загружено {len(room_names)} номеров для фильтра")
     
     def apply_filter(self):
         client_name = self.client_combobox.get()
@@ -295,16 +432,22 @@ class DataFilter:
         try:
             cur = self.db_connection.cursor()
             cur.execute(
-                APPLY_FILTERS_SQL, (client_id, client_id, room_id, room_id, date_from, date_from, date_to, date_to)
+                APPLY_FILTERS_SQL, 
+                (client_id, client_id, room_id, room_id, date_from, date_from, date_to, date_to)
             )
             results = cur.fetchall()
             cur.close()
             
+            # Очищаем таблицу
             for row in self.results_table.get_children():
                 self.results_table.delete(row)
+            
+            # Заполняем отфильтрованными данными
             for result in results:
                 self.results_table.insert('', 'end', values=result)
                 
             messagebox.showinfo("Успех", f"Найдено {len(results)} записей")
+            
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось применить фильтр: {e}")
+            print(f"Ошибка фильтрации: {e}")
